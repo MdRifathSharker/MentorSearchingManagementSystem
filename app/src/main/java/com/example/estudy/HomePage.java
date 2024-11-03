@@ -1,5 +1,6 @@
 package com.example.estudy;
 
+import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -31,13 +32,16 @@ import com.google.firebase.storage.StorageReference;
 import com.squareup.picasso.Picasso;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public class HomePage extends AppCompatActivity {
     private FirebaseStorage storage;
     private StorageReference storageReference;
     private DatabaseReference databaseReference;
-    ArrayList<HomePageItemModel> list=new ArrayList<>();
+    private List<PostModel> postList;
+    private OwnProfileAdapter ownProfileAdapter;
+    private String userEmail;
 
 
     @Override
@@ -48,32 +52,26 @@ public class HomePage extends AppCompatActivity {
         setContentView(R.layout.activity_home_page);
         ImageButton profilePictureButton = findViewById(R.id.HomeProfilePictureButton);
         Intent intent = getIntent();
-        String userEmail = intent.getStringExtra("USER_EMAIL");
+        userEmail = intent.getStringExtra("USER_EMAIL");
         String encodedEmail = encodeEmail(userEmail);
         DatabaseReference usersRef = FirebaseDatabase.getInstance().getReference(encodeEmail(userEmail));
 
-
+        storage = FirebaseStorage.getInstance();
+        postList = new ArrayList<>();
+        ownProfileAdapter = new OwnProfileAdapter(postList, this);
+        RecyclerView recyclerView = findViewById(R.id.HomeRecyclerList);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        recyclerView.setAdapter(ownProfileAdapter);
+        loadPostsFromFirebase();
 
         ///recycler
         RecyclerView allList=findViewById(R.id.HomeRecyclerList);
         allList.setLayoutManager(new LinearLayoutManager(this));
 
-        list.add(new HomePageItemModel("HM Jubayed", R.drawable.defaultpic, "Enjoying the sunshine!", R.drawable.defaultpic));
-        list.add(new HomePageItemModel("B", R.drawable.ic_launcher_background, "Learning Android development!", R.drawable.ic_launcher_foreground));
-        list.add(new HomePageItemModel("C", R.drawable.defaultpic, "Just finished a great workout.", R.drawable.ic_launcher_foreground));
-        list.add(new HomePageItemModel("D", R.drawable.defaultpic, "Happy Monday everyone!", R.drawable.ic_launcher_foreground));
-        list.add(new HomePageItemModel("D", R.drawable.defaultpic, "Happy Birthday !", R.drawable.ic_launcher_foreground));
-        list.add(new HomePageItemModel("D", R.drawable.defaultpic, "Hellow everyone!", R.drawable.ic_launcher_foreground));
-        list.add(new HomePageItemModel("D", R.drawable.defaultpic, "Welcome!", R.drawable.ic_launcher_foreground));
-
-        HomeItemRecyclerAdapter adapter=new HomeItemRecyclerAdapter(this,list);
-        allList.setAdapter(adapter);
-
-
         profilePictureButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Toast.makeText(HomePage.this,"Profile",Toast.LENGTH_SHORT).show();
+               //Toast.makeText(HomePage.this,"Profile",Toast.LENGTH_SHORT).show();
                 Intent profileIntent = new Intent(HomePage.this, OwnProfile.class);
                 profileIntent.putExtra("USER_EMAIL", userEmail); // Pass user email to profile
                 startActivity(profileIntent);
@@ -153,6 +151,34 @@ public class HomePage extends AppCompatActivity {
             }
         });
     }
+    private void loadPostsFromFirebase() {
+        DatabaseReference postRef = FirebaseDatabase.getInstance().getReference("posts").child("Time");
+        postRef.addValueEventListener(new ValueEventListener() {
+            @SuppressLint("NotifyDataSetChanged")
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                postList.clear();
+                for(DataSnapshot snapshot : dataSnapshot.getChildren()) {
+                    PostModel post = snapshot.getValue(PostModel.class);
+                    if (post != null) {
+                        Log.d("Post Data", "Post: " + post.getText() + ", Timestamp: " + post.getTimestamp());
+                        postList.add(0, post);  // Adds each post to the start of the list
+                    } else {
+                        Log.d("Post Data", "Post is null at key: " + snapshot.child("email").getValue().toString().trim());
+                    }
+                }
+                ownProfileAdapter.notifyDataSetChanged();
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Log.e("Firebase Error", "Failed to load posts: " + databaseError.getMessage());
+                Toast.makeText(HomePage.this, "Failed to load posts", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+
     private String encodeEmail(String email) {
         return email.replace(".", ",");
     }

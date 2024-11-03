@@ -1,24 +1,25 @@
 package com.example.estudy;
 
+import android.annotation.SuppressLint;
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.Toast;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -29,6 +30,7 @@ import com.google.firebase.storage.StorageReference;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class PostPage extends AppCompatActivity {
 
@@ -39,13 +41,9 @@ public class PostPage extends AppCompatActivity {
     private Button postButton;
     private ImageView imagePreview;
     private RecyclerView postsRecyclerView;
-    private FloatingActionButton fabCreatePost;
+    private StorageReference storageReference;
 
     private Uri imageUri = null;
-    private DatabaseReference postsRef, usersRef;
-    private StorageReference storageRef;
-    private FirebaseAuth mAuth;
-    private FirebaseUser currentUser;
 
     private List<PostModel> postList;
     private PostAdapter postAdapter;
@@ -57,53 +55,36 @@ public class PostPage extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_post_page);
 
+        // Initialize Firebase storage reference
+        storageReference = FirebaseStorage.getInstance().getReference();
+
         // Initialize views
         postInput = findViewById(R.id.post_input);
         addImageButton = findViewById(R.id.add_image_button);
         postButton = findViewById(R.id.post_button);
         imagePreview = findViewById(R.id.image_preview);
         postsRecyclerView = findViewById(R.id.posts_recyclerview);
-        fabCreatePost = findViewById(R.id.fab_create_post);
 
-        // Initialize Firebase Authentication and get current user
-        mAuth = FirebaseAuth.getInstance();
-        currentUser = mAuth.getCurrentUser();
+        Intent intent = getIntent();
+        userEmail = intent.getStringExtra("USER_EMAIL");
 
-        if (currentUser != null) {
-            userEmail = currentUser.getEmail();
-            userProfileUrl = currentUser.getPhotoUrl() != null ? currentUser.getPhotoUrl().toString() : null;
-        } else {
-            Log.e("PostPage", "User not logged in.");
-            Toast.makeText(this, "User not logged in", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
-
-        // Initialize Firebase references
-        postsRef = FirebaseDatabase.getInstance().getReference().child("posts");
-        usersRef = FirebaseDatabase.getInstance().getReference().child("users");
-        storageRef = FirebaseStorage.getInstance().getReference().child("post_images");
-
-        // Initialize RecyclerView and adapter
+        // Initialize post list and adapter
         postList = new ArrayList<>();
         postAdapter = new PostAdapter(postList, this);
         postsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         postsRecyclerView.setAdapter(postAdapter);
 
-        // Open gallery to select an image
+        // Set up button click listeners
         addImageButton.setOnClickListener(v -> openGallery());
-
-        // Handle posting text and image
         postButton.setOnClickListener(v -> {
             String postText = postInput.getText().toString().trim();
             if (!postText.isEmpty() || imageUri != null) {
-                retrieveUserNameAndPost(postText); // First, retrieve user name, then post
+                retrieveUserNameAndPost(postText);
             } else {
                 Toast.makeText(PostPage.this, "Enter text or select an image", Toast.LENGTH_SHORT).show();
             }
         });
 
-        // Load posts from Firebase
         loadPostsFromFirebase();
     }
 
@@ -115,7 +96,6 @@ public class PostPage extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-
         if (requestCode == GALLERY_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
             imageUri = data.getData();
             imagePreview.setImageURI(imageUri);
@@ -125,12 +105,16 @@ public class PostPage extends AppCompatActivity {
 
     private void retrieveUserNameAndPost(String postText) {
         if (userEmail != null) {
-            String encodedEmail = encodeEmail(userEmail);
-            usersRef.child(encodedEmail).addListenerForSingleValueEvent(new ValueEventListener() {
+            DatabaseReference userRef = FirebaseDatabase.getInstance().getReference("Users")
+                    .child(encodeEmail(userEmail))
+                    .child("RegistrationPageInformation");
+
+            userRef.addListenerForSingleValueEvent(new ValueEventListener() {
                 @Override
-                public void onDataChange(DataSnapshot dataSnapshot) {
+                public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
                     if (dataSnapshot.exists()) {
                         userName = dataSnapshot.child("name").getValue(String.class);
+                        userProfileUrl = dataSnapshot.child("profilePictureUrl").getValue(String.class);
                         if (userName != null) {
                             uploadPost(postText);
                         } else {
@@ -140,7 +124,7 @@ public class PostPage extends AppCompatActivity {
                 }
 
                 @Override
-                public void onCancelled(DatabaseError databaseError) {
+                public void onCancelled(@NonNull DatabaseError databaseError) {
                     Toast.makeText(PostPage.this, "Database error: " + databaseError.getMessage(), Toast.LENGTH_SHORT).show();
                 }
             });
@@ -148,67 +132,88 @@ public class PostPage extends AppCompatActivity {
     }
 
     private void uploadPost(String postText) {
+        ProgressDialog progressDialog = new ProgressDialog(this);
+        progressDialog.setMessage("Uploading...");
+        progressDialog.show();
+
         if (imageUri != null) {
-            StorageReference fileRef = storageRef.child(System.currentTimeMillis() + ".jpg");
-            fileRef.putFile(imageUri).addOnSuccessListener(taskSnapshot -> fileRef.getDownloadUrl().addOnSuccessListener(uri -> {
-                String imageUrl = uri.toString();
-                savePostToDatabase(postText, imageUrl);
-            })).addOnFailureListener(e -> Toast.makeText(PostPage.this, "Image upload failed", Toast.LENGTH_SHORT).show());
+            String fileName = UUID.randomUUID().toString();
+            StorageReference ref = storageReference.child("images/" + fileName);
+
+            ref.putFile(imageUri)
+                    .addOnSuccessListener(taskSnapshot -> ref.getDownloadUrl().addOnSuccessListener(uri -> {
+                        progressDialog.dismiss();
+                        String imageUrl = uri.toString();
+                        savePostToDatabase(postText, imageUrl);
+                    }))
+                    .addOnFailureListener(e -> {
+                        progressDialog.dismiss();
+                        Toast.makeText(PostPage.this, "Image upload failed", Toast.LENGTH_SHORT).show();
+                    });
         } else {
+            progressDialog.dismiss();
             savePostToDatabase(postText, null);
         }
     }
 
-    private void savePostToDatabase(String postText, @Nullable String imageUrl) {
-        if (userEmail != null && userName != null) {
-            String encodedEmail = encodeEmail(userEmail);
-            String postId = postsRef.child(encodedEmail).push().getKey();
+    private void savePostToDatabase(String postText, String imageUrl) {
+        long timestamp = System.currentTimeMillis();
+        DatabaseReference postsRef = FirebaseDatabase.getInstance().getReference("posts").child("Email");
+        DatabaseReference postsRef2 = FirebaseDatabase.getInstance().getReference("posts").child("Time");
+        String postId = postsRef.push().getKey();
+        PostModel post = new PostModel(postId, userProfileUrl, userEmail, userName, postText, imageUrl, timestamp,userEmail);
 
-            if (postId != null) {
-                PostModel post = new PostModel(postId,userEmail,userName, postText, imageUrl, System.currentTimeMillis());
-
-                postsRef.child(encodedEmail).child(postId).setValue(post).addOnCompleteListener(task -> {
-                    if (task.isSuccessful()) {
-                        Toast.makeText(PostPage.this, "Post uploaded successfully", Toast.LENGTH_SHORT).show();
-                        resetPostInput();
-                    } else {
-                        Toast.makeText(PostPage.this, "Failed to upload post", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            }
+        if (postId != null) {
+            postsRef.child(encodeEmail(userEmail)).child(postId).setValue(post)
+                    .addOnCompleteListener(task -> {
+                        if (task.isSuccessful()) {
+                            Toast.makeText(PostPage.this, "Post uploaded successfully", Toast.LENGTH_SHORT).show();
+                            postInput.setText("");
+                            imagePreview.setVisibility(View.GONE);
+                            imageUri = null;
+                        } else {
+                            Toast.makeText(PostPage.this, "Failed to upload post", Toast.LENGTH_SHORT).show();
+                        }
+                    });
         }
-    }
-
-    private void resetPostInput() {
-        postInput.setText("");
-        imagePreview.setVisibility(View.GONE);
-        imageUri = null;
+        if (postId != null) {
+            postsRef2.child(postId).setValue(post)
+                    .addOnCompleteListener(task -> {
+                        if (task.isSuccessful()) {
+                            Toast.makeText(PostPage.this, "Post uploaded successfully", Toast.LENGTH_SHORT).show();
+                            postInput.setText("");
+                            imagePreview.setVisibility(View.GONE);
+                            imageUri = null;
+                        } else {
+                            Toast.makeText(PostPage.this, "Failed to upload post", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+        }
     }
 
     private void loadPostsFromFirebase() {
-        //String encodedEmail = encodeEmail(userEmail);
-        if (userEmail != null) {
-            String encodedEmail = encodeEmail(userEmail);
-            postsRef.child(encodedEmail).addValueEventListener(new ValueEventListener() {
-                @Override
-                public void onDataChange(DataSnapshot dataSnapshot) {
-                    postList.clear();
-                    for (DataSnapshot snapshot : dataSnapshot.getChildren()) {
-                        PostModel post = snapshot.getValue(PostModel.class);
-                        if (post != null) {
-                            postList.add(post);
-                        }
+        DatabaseReference postRef = FirebaseDatabase.getInstance().getReference("posts").child("Email").child(encodeEmail(userEmail));
+        postRef.orderByChild("timestamp").addValueEventListener(new ValueEventListener() {
+            @SuppressLint("NotifyDataSetChanged")
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                postList.clear();
+                for (DataSnapshot snapshot : dataSnapshot.getChildren()) {
+                    PostModel post = snapshot.getValue(PostModel.class);
+                    if (post != null) {
+                        postList.add(0, post);  // Adds each post to the start of the list
                     }
-                    postAdapter.notifyDataSetChanged();
                 }
+                postAdapter.notifyDataSetChanged();
+            }
 
-                @Override
-                public void onCancelled(DatabaseError databaseError) {
-                    Toast.makeText(PostPage.this, "Failed to load posts", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Toast.makeText(PostPage.this, "Failed to load posts", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
+
 
     private String encodeEmail(String email) {
         return email.replace(".", ",");

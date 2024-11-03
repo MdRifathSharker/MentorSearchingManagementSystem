@@ -136,8 +136,9 @@ public class LoginActivity extends AppCompatActivity {
 //                    usersData.child(Name).child(encodeEmail(userUserName)).child("Name").setValue(Name);
 //                    usersData.child(Name).child(encodeEmail(userUserName)).child("Email").setValue(userUserName);
                     String passwordFromDB = snapshot.child("password").getValue(String.class);
+                    String name = snapshot.child("name").getValue(String.class);
                     if (Objects.equals(passwordFromDB, userPassword)) {
-                        // Password is correct, proceed to profile activity
+                        Toast.makeText(LoginActivity.this,"Wellcome "+ name, Toast.LENGTH_SHORT).show();
                         Intent intent = new Intent(LoginActivity.this, HomePage.class);
                         intent.putExtra("USER_EMAIL", userUserName);
                         startActivity(intent);

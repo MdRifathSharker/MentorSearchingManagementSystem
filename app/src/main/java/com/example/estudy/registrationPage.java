@@ -100,11 +100,11 @@ public class registrationPage extends AppCompatActivity implements View.OnClickL
             RegisterphoneEditText.requestFocus();
             return;
         }
-        if (!INTERNATIONAL_PHONE_PATTERN.matcher(phone).matches()) {
-            RegisterphoneEditText.setError("Enter a valid international phone number (e.g., +1234567890)");
-            RegisterphoneEditText.requestFocus();
-            return;
-        }
+//        if (!INTERNATIONAL_PHONE_PATTERN.matcher(phone).matches()) {
+//            RegisterphoneEditText.setError("Enter a valid international phone number (e.g., +1234567890)");
+//            RegisterphoneEditText.requestFocus();
+//            return;
+//        }
         if (password.isEmpty()) {
             RegisterPasswordEditText.setError("Enter a password");
             RegisterPasswordEditText.requestFocus();
